@@ -43,6 +43,7 @@ def start_required(f):
     """Ensures that an tournament is logged in"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        db = dataset.connect(config['db'])
         userCount = db['users'].count()
         user = get_user()
         if user["isAdmin"] == False and (datetime.datetime.today() < config['startTime'] and userCount != 0):
@@ -76,6 +77,7 @@ def admin_required(f):
 def get_user():
     """Looks up the current user in the database"""
 
+    db = dataset.connect(config['db'])
     login = 'user_id' in session
     if login:
         return db['users'].find_one(id=session['user_id'])
@@ -85,14 +87,15 @@ def get_user():
 def get_task(tid):
     """Finds a task with a given category and score"""
 
+    db = dataset.connect(config['db'])
     task = db.query("SELECT t.*, c.name cat_name FROM tasks t JOIN categories c on c.id = t.category WHERE t.id = :tid",
             tid=tid)
-
     return task.next()
 
 def get_flags():
     """Returns the flags of the current user"""
 
+    db = dataset.connect(config['db'])
     flags = db.query('''select f.task_id from flags f
         where f.user_id = :user_id''',
         user_id=session['user_id'])
@@ -101,12 +104,11 @@ def get_flags():
 def get_total_completion_count():
     """Returns dictionary where key is task id and value is the number of users who have submitted the flag"""
 
+    db = dataset.connect(config['db'])
     c = db.query("select t.id, count(t.id) count from tasks t join flags f on t.id = f.task_id group by t.id;")
-
     res = {}
     for r in c:
         res.update({r['id']: r['count']})
-
     return res
 
 @app.route('/error/<msg>')
@@ -117,14 +119,13 @@ def error(msg):
         message = lang['error'][msg]
     else:
         message = lang['error']['unknown']
-
     user = get_user()
-
     render = render_template('frame.html', lang=lang, page='error.html',
         message=message, user=user)
     return make_response(render)
 
 def session_login(email):
+    db = dataset.connect(config['db'])
     """Initializes the session with the current user's id"""
     user = db['users'].find_one(email=email)
     session['user_id'] = user['id']
@@ -140,7 +141,7 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
 @app.route('/login', methods = ['POST'])
 def login():
     """Attempts to log the user in"""
-
+    db = dataset.connect(config['db'])
     from werkzeug.security import check_password_hash
 
     email = request.form['email']
@@ -160,7 +161,7 @@ def login():
 @app.route('/register')
 def register():
     """Displays the register form"""
-
+    db = dataset.connect(config['db'])
     userCount = db['users'].count()
     if datetime.datetime.today() < config['startTime'] and userCount != 0:
         return redirect('/error/not_started')
@@ -173,6 +174,7 @@ def register():
 @app.route('/register/submit', methods = ['POST'])
 def register_submit():
     """Attempts to register a new user"""
+    db = dataset.connect(config['db'])
 
     from werkzeug.security import generate_password_hash
 
@@ -216,6 +218,7 @@ def register_submit():
 @start_required
 def tasks():
     """Displays all the tasks in a grid"""
+    db = dataset.connect(config['db'])
 
     user = get_user()
     userCount = db['users'].count(isHidden=0)
@@ -266,6 +269,7 @@ def tasks():
 @app.route('/addcat/', methods=['GET'])
 @admin_required
 def addcat():
+    db = dataset.connect(config['db'])
     user = get_user()
     render = render_template('frame.html', lang=lang, user=user, page='addcat.html')
     return make_response(render)
@@ -273,6 +277,7 @@ def addcat():
 @app.route('/makedump', methods=['GET'])
 @admin_required
 def makedump():
+    db = dataset.connect(config['db'])
     result = db['users'].all()
     fh = open('users.json', 'wb')
     dataset.freeze(result, format='json', fileobj=fh)
@@ -284,6 +289,7 @@ def makedump():
 @app.route('/addcat/', methods=['POST'])
 @admin_required
 def addcatsubmit():
+    db = dataset.connect(config['db'])
     try:
         name = bleach.clean(request.form['name'], tags=[])
     except KeyError:
@@ -296,6 +302,7 @@ def addcatsubmit():
 @app.route('/editcat/<id>/', methods=['GET'])
 @admin_required
 def editcat(id):
+    db = dataset.connect(config['db'])
     user = get_user()
     category = db['categories'].find_one(id=id)
     render = render_template('frame.html', lang=lang, user=user, category=category, page='editcat.html')
@@ -304,6 +311,7 @@ def editcat(id):
 @app.route('/editcat/<catId>/', methods=['POST'])
 @admin_required
 def editcatsubmit(catId):
+    db = dataset.connect(config['db'])
     try:
         name = bleach.clean(request.form['name'], tags=[])
     except KeyError:
@@ -316,6 +324,7 @@ def editcatsubmit(catId):
 @app.route('/editcat/<catId>/delete', methods=['GET'])
 @admin_required
 def deletecat(catId):
+    db = dataset.connect(config['db'])
     category = db['categories'].find_one(id=catId)
 
     user = get_user()
@@ -325,12 +334,14 @@ def deletecat(catId):
 @app.route('/editcat/<catId>/delete', methods=['POST'])
 @admin_required
 def deletecatsubmit(catId):
+    db = dataset.connect(config['db'])
     db['categories'].delete(id=catId)
     return redirect('/tasks')
 
 @app.route('/addtask/<cat>/', methods=['GET'])
 @admin_required
 def addtask(cat):
+    db = dataset.connect(config['db'])
     category = db['categories'].find_one(id=cat)
 
     user = get_user()
@@ -342,6 +353,7 @@ def addtask(cat):
 @app.route('/addtask/<cat>/', methods=['POST'])
 @admin_required
 def addtasksubmit(cat):
+    db = dataset.connect(config['db'])
     try:
         name = bleach.clean(request.form['name'], tags=[])
         desc = bleach.clean(request.form['desc'], tags=descAllowedTags)
@@ -383,6 +395,7 @@ def addtasksubmit(cat):
 @app.route('/tasks/<tid>/edit', methods=['GET'])
 @admin_required
 def edittask(tid):
+    db = dataset.connect(config['db'])
     user = get_user()
 
     task = db["tasks"].find_one(id=tid);
@@ -396,6 +409,7 @@ def edittask(tid):
 @app.route('/tasks/<tid>/edit', methods=['POST'])
 @admin_required
 def edittasksubmit(tid):
+    db = dataset.connect(config['db'])
     try:
         name = bleach.clean(request.form['name'], tags=[])
         desc = bleach.clean(request.form['desc'], tags=descAllowedTags)
@@ -447,6 +461,7 @@ def edittasksubmit(tid):
 @app.route('/tasks/<tid>/delete', methods=['GET'])
 @admin_required
 def deletetask(tid):
+    db = dataset.connect(config['db'])
     tasks = db['tasks']
     task = tasks.find_one(id=tid)
 
@@ -457,6 +472,7 @@ def deletetask(tid):
 @app.route('/tasks/<tid>/delete', methods=['POST'])
 @admin_required
 def deletetasksubmit(tid):
+    db = dataset.connect(config['db'])
     db['tasks'].delete(id=tid)
     return redirect('/tasks')
 
@@ -464,6 +480,7 @@ def deletetasksubmit(tid):
 @login_required
 def task(tid):
     """Displays a task with a given category and score"""
+    db = dataset.connect(config['db'])
 
     user = get_user()
 
@@ -487,8 +504,7 @@ def task(tid):
 @login_required
 def submit(tid, flag):
     """Handles the submission of flags"""
-
-    print(flag)
+    db = dataset.connect(config['db'])
     user = get_user()
 
     task = get_task(tid)
@@ -516,6 +532,7 @@ def submit(tid, flag):
 @login_required
 def scoreboard():
     """Displays the scoreboard"""
+    db = dataset.connect(config['db'])
 
     user = get_user()
     scores = db.query('''select u.username, u.affilation, u.logo, ifnull(sum(f.score), 0) as score,
@@ -532,6 +549,7 @@ def scoreboard():
 
 @app.route('/scoreboard.json')
 def scoreboard_json():
+    db = dataset.connect(config['db'])
     scores = db.query('''select u.username, ifnull(sum(f.score), 0) as score,
         max(timestamp) as last_submit from users u left join flags f
         on u.id = f.user_id where u.isHidden = 0 group by u.username
@@ -545,6 +563,7 @@ def scoreboard_json():
 @login_required
 def about():
     """Displays the about menu"""
+    db = dataset.connect(config['db'])
 
     user = get_user()
     render = render_template('frame.html', lang=lang, page='about.html',
@@ -588,6 +607,7 @@ def about():
 @login_required
 def logout():
     """Logs the current user out"""
+    db = dataset.connect(config['db'])
 
     del session['user_id']
     return redirect('/')
@@ -595,6 +615,7 @@ def logout():
 @app.route('/')
 def index():
     """Displays the main page"""
+    db = dataset.connect(config['db'])
 
     user = get_user()
 
@@ -625,7 +646,7 @@ lang = json.loads(lang_str)
 lang = lang[config['language']]
 
 # Connect to database
-db = dataset.connect(config['db'])
+# db = dataset.connect(config['db'])
 
 if config['isProxied']:
     app.wsgi_app = ProxyFix(app.wsgi_app)
